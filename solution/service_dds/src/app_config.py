@@ -3,7 +3,6 @@ import os
 from lib.kafka_connect import KafkaConsumer, KafkaProducer
 from lib.pg import PgConnect
 
-
 class AppConfig:
     CERTIFICATE_PATH = '/crt/YandexInternalRootCA.crt'
 
