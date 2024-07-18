@@ -4,7 +4,7 @@ import uuid
 
 from lib.kafka_connect import KafkaConsumer, KafkaProducer
 from dds_loader.repository import DdsRepository
-from dds_loader.builder import OrderDdsBuilder
+from dds_loader.repository import OrderDdsBuilder
 
 class DdsMessageProcessor:
     def __init__(self,
