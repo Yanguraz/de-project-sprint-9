@@ -4,7 +4,7 @@ import uuid
 
 from lib.kafka_connect import KafkaConsumer, KafkaProducer
 from dds_loader.repository import DdsRepository
-
+from dds_loader.builder import OrderDdsBuilder
 
 class DdsMessageProcessor:
     def __init__(self,
@@ -35,81 +35,51 @@ class DdsMessageProcessor:
             load_dt = datetime.now() 
             load_src = self._consumer.topic
 
-            # Извлечение основных полей из payload
-            order_id = payload['id']
-            order_dt = payload['date']
-            user = payload['user']
-            user_id = user['id']
-            username = user['name']
-            userlogin = user['login']
-            restaurant_id = payload['restaurant']['id']
-            restaurant_name = payload['restaurant']['name']
-            order_cost = payload['cost']
-            order_payment = payload['payment']
-            order_status = payload['status']
-            products = payload['products']
-
-            # Генерация первичных ключей и хешей для пользователя, ресторана и заказа
-            h_user_pk = str(uuid.uuid5(uuid.NAMESPACE_DNS, user_id))
-            h_restaurant_pk = str(uuid.uuid5(uuid.NAMESPACE_DNS, restaurant_id))
-            h_order_pk = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(order_id)))
-            hk_order_user_pk = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{h_order_pk}{h_user_pk}"))
-            hk_user_names_hashdiff = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{h_user_pk}{username}{userlogin}"))
-            hk_restaurant_names_hashdiff = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{h_restaurant_pk}{restaurant_name}"))
-            hk_order_cost_hashdiff = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{h_order_pk}{order_cost}{order_payment}"))
-            hk_order_status_hashdiff = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{h_order_pk}{order_status}"))
-
+            builder = OrderDdsBuilder(payload)
+            
+            h_user = builder.h_user()
+            h_products = builder.h_product()
+            h_categories = builder.h_category()
+            h_restaurant = builder.h_restaurant()
+            h_order = builder.h_order()
+            
+            l_order_product_links = builder.l_order_product(h_order.h_order_pk, h_products)
+            l_product_restaurant_links = builder.l_product_restaurant(h_products, h_restaurant.h_restaurant_pk)
+            l_product_category_links = builder.l_product_category(h_products, h_categories)
+            l_order_user_link = builder.l_order_user(h_order.h_order_pk, h_user)
+            
+            s_user_names = builder.s_user_names(h_user)
+            s_product_names = builder.s_product_names(h_products)
+            s_restaurant_names = builder.s_restaurant_names(h_restaurant)
+            s_order_cost = builder.s_order_cost(h_order)
+            s_order_status = builder.s_order_status(h_order)
+            
             # Вставка данных в DdsRepository
-            self._dds_repository.h_user_insert(h_user_pk, user_id, load_dt, load_src)
-            self._dds_repository.h_restaurant_insert(h_restaurant_pk, restaurant_id, load_dt, load_src)
-            self._dds_repository.h_order_insert(h_order_pk, order_id, load_dt, order_dt, load_src)
-            self._dds_repository.l_order_user_insert(hk_order_user_pk, h_order_pk, h_user_pk, load_dt, load_src)
-            self._dds_repository.s_user_names_insert(h_user_pk, username, userlogin, load_dt, load_src, hk_user_names_hashdiff)
-            self._dds_repository.s_restaurant_names_insert(h_restaurant_pk, restaurant_name, load_dt, load_src, hk_restaurant_names_hashdiff)
-            self._dds_repository.s_order_cost_insert(h_order_pk, order_cost, order_payment, load_dt, load_src, hk_order_cost_hashdiff)
-            self._dds_repository.s_order_status_insert(h_order_pk, order_status, load_dt, load_src, hk_order_status_hashdiff)
+            self._dds_repository.insert_h_user(h_user)
+            self._dds_repository.insert_h_product(h_products)
+            self._dds_repository.insert_h_category(h_categories)
+            self._dds_repository.insert_h_restaurant(h_restaurant)
+            self._dds_repository.insert_h_order(h_order)
+            
+            self._dds_repository.insert_l_order_product(l_order_product_links)
+            self._dds_repository.insert_l_product_restaurant(l_product_restaurant_links)
+            self._dds_repository.insert_l_product_category(l_product_category_links)
+            self._dds_repository.insert_l_order_user(l_order_user_link)
+            
+            self._dds_repository.insert_s_user_names(s_user_names)
+            self._dds_repository.insert_s_product_names(s_product_names)
+            self._dds_repository.insert_s_restaurant_names(s_restaurant_names)
+            self._dds_repository.insert_s_order_cost(s_order_cost)
+            self._dds_repository.insert_s_order_status(s_order_status)
 
-            h_product_pk_list = []
-            h_category_pk_list = []
-            product_name_list = []
-            category_name_list = []
-            prod_quantity_list = []
-
-            for product in products:
-                product_id = product['id']
-                category_name = product['category']
-                product_name = product['name']
-                quantity = product['quantity']
-
-                h_product_pk = str(uuid.uuid5(uuid.NAMESPACE_DNS, product_id))
-                h_category_pk = str(uuid.uuid5(uuid.NAMESPACE_DNS, category_name))
-
-                hk_order_product_pk = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{h_order_pk}{h_product_pk}"))
-                hk_product_restaurant_pk = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{h_product_pk}{h_restaurant_pk}"))
-                hk_product_category_pk = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{h_product_pk}{h_category_pk}"))
-                hk_product_names_hashdiff = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{h_product_pk}{product_name}"))
-
-                self._dds_repository.h_product_insert(h_product_pk, product_id, load_dt, load_src)
-                self._dds_repository.h_category_insert(h_category_pk, category_name, load_dt, load_src)
-                self._dds_repository.l_order_product_insert(hk_order_product_pk, h_order_pk, h_product_pk, load_dt, load_src)
-                self._dds_repository.l_product_restaurant_insert(hk_product_restaurant_pk, h_product_pk, h_restaurant_pk, load_dt, load_src)
-                self._dds_repository.l_product_category_insert(hk_product_category_pk, h_product_pk, h_category_pk, load_dt, load_src)
-                self._dds_repository.s_product_names_insert(h_product_pk, product_name, load_dt, load_src, hk_product_names_hashdiff)
-
-                h_product_pk_list.append(h_product_pk)
-                h_category_pk_list.append(h_category_pk)
-                product_name_list.append(product_name)
-                category_name_list.append(category_name)
-                prod_quantity_list.append(quantity)
-
-            # Формирование и отправка итогового сообщения в топик
+             # Формирование и отправка итогового сообщения в топик
             dst_msg = {
-                "user_id": h_user_pk,
-                "product_id": h_product_pk_list,
-                "product_name": product_name_list,
-                "category_id": h_category_pk_list,
-                "category_name": category_name_list,
-                "order_cnt": prod_quantity_list 
+                "user_id": h_user.h_user_pk,
+                "product_id": [p.h_product_pk for p in h_products],
+                "product_name": [p.name for p in h_products],
+                "category_id": [c.h_category_pk for c in h_categories],
+                "category_name": [c.category_name for c in h_categories],
+                "order_cnt": [p.quantity for p in h_products]
             }
 
             self._producer.produce(dst_msg)
